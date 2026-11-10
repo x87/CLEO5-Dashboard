@@ -1,0 +1,63 @@
+name: Release
+
+# Tag push -> Win7-compatible build -> GitHub release with the binary attached.
+# The build itself is build_win7.sh, so CI and a local build run the same steps.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7, pinned like CLEO5
+
+      - name: Check tag against Cargo.toml
+        id: tag
+        shell: pwsh
+        run: |
+          $version = ($env:GITHUB_REF_NAME -replace '^v', '') -replace '-.*$', ''
+          $declared = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
+          if ($version -ne $declared) {
+            throw "tag $env:GITHUB_REF_NAME does not match Cargo.toml version $declared"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "releasing $env:GITHUB_REF_NAME (Cargo.toml $declared)"
+
+      # build-std compiles std from source, so the nightly needs rust-src. The pinned date in
+      # build_win7.sh is preferred when present; the floating nightly is the CI default.
+      - name: Install nightly toolchain
+        shell: bash
+        run: rustup toolchain install nightly --profile minimal --component rust-src
+
+      - name: Build
+        shell: bash
+        run: bash build_win7.sh
+
+      - name: Create release
+        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # 1.21.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          name: ${{ steps.tag.outputs.version }}
+          tag: ${{ github.ref_name }}
+          prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}
+          generateReleaseNotes: true
+          body: |
+            Built for Windows 7 and newer;
+
+            **Install:** copy `SA.Dashboard.cleo` into `GTA San Andreas\CLEO\CLEO_PLUGINS\`.
+            Press **Insert** in game to open the menu.
+          artifacts: "SA.Dashboard.cleo"
+          allowUpdates: true

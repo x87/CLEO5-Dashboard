@@ -1,0 +1,11 @@
+/target
+/.tmp
+/tmp
+
+# build output (the linker writes SA.Dashboard.cleo next to Cargo.toml)
+*.cleo
+*.pdb
+*.asi
+*.dll
+*.exe
+*.log
