@@ -4,6 +4,9 @@ An in-game overlay for CLEO 5 (GTA San Andreas 1.0 US).
 
 Press **Insert** (rebindable) to open and close it.
 
+<img width="640" height="480" alt="image" src="https://github.com/user-attachments/assets/ec27f9ce-1c70-41d3-a155-421d1fdfc3a3" /> <img width="640" height="480" alt="image" src="https://github.com/user-attachments/assets/2fe9dec8-0f10-4982-96dc-19751d855c2c" />
+
+
 ## Tabs
 
 - **Scripts** - loaded scripts. From here you can change a script's compatibility mode, turn debug mode on and off, suspend or resume it, dump it to disk, or reload it.
