@@ -20,7 +20,7 @@ The overlay renders with [hudhook](https://github.com/veeenu/hudhook) (D3D9).
 ## Requirements
 
 - GTA San Andreas 1.0 US (tested with Compact and Hoodlum)
-- The [latest preview build](https://github.com/cleolibrary/CLEO5/releases/tag/preview) of CLEO 5
+- [CLEO 5.5.1 or higher](https://github.com/cleolibrary/CLEO5/releases)
 
 ## Build
 
