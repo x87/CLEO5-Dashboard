@@ -119,6 +119,12 @@ impl LogTail {
         }
     }
 
+    /// Drop the refresh interval, so the next [`refresh`](Self::refresh) reads the file even
+    /// if one just happened. Used when the tab showing the log comes back on screen.
+    pub fn invalidate(&mut self) {
+        self.last_refresh = 0;
+    }
+
     /// Toolbar (which log, tracing level, auto-scroll) plus the scrollable log body.
     ///
     /// `source` indexes [`LOG_SOURCES`].

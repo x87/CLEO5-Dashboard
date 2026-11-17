@@ -12,6 +12,7 @@ mod sdk;
 mod strings;
 mod table;
 mod theme;
+mod utils;
 mod version;
 
 use ctor::*;
@@ -21,19 +22,14 @@ use hudhook::{
     windows::Win32::{
         Foundation::HMODULE, System::LibraryLoader::GetModuleFileNameA,
         System::SystemInformation::GetTickCount,
-        UI::Input::KeyboardAndMouse::GetAsyncKeyState,
     },
     *,
 };
 use imgui::{Condition, Context, Ui};
 use sdk::*;
-
-fn ptr_to_rust_str<'a>(ptr: *const i8) -> &'a str {
-    unsafe {
-        assert!(!ptr.is_null());
-        std::ffi::CStr::from_ptr(ptr).to_str().unwrap()
-    }
-}
+use utils::{
+    async_key_down, elide_path, make_path_relative_to_exe, ptr_to_rust_str, settings_file_path,
+};
 
 #[derive(Clone, Copy)]
 enum Colors {
@@ -89,61 +85,6 @@ static mut UPDATE_STATUS: u32 = 0;
 /// it without touching the render loop.
 fn is_open() -> bool {
     overlay::is_open()
-}
-
-/// Shorten a script path to `budget` pixels, keeping its head and its tail.
-///
-/// Script paths repeat their middle (`modloader\<mod>\cleo\<file>`), so dropping it keeps
-/// both the mod that owns the file and the file name, which is what tells two scripts
-/// apart. As many trailing folders as fit are kept.
-fn elide_path(ui: &Ui, path: &str, budget: f32) -> String {
-    use std::path::MAIN_SEPARATOR as SEP;
-
-    let fits = |text: &str| ui.calc_text_size(text)[0] <= budget;
-    if fits(path) {
-        return path.to_string();
-    }
-
-    let parts: Vec<&str> = path.split(SEP).collect();
-    if parts.len() < 2 {
-        return elide_tail(ui, path, budget);
-    }
-
-    let head = format!("{}{}...{}", parts[0], SEP, SEP);
-    let mut tail = String::new();
-    for part in parts[1..].iter().rev() {
-        let candidate = if tail.is_empty() {
-            (*part).to_string()
-        } else {
-            format!("{part}{SEP}{tail}")
-        };
-        // Always keep the file name; if even that overflows, cut its head.
-        if tail.is_empty() || fits(&format!("{head}{candidate}")) {
-            tail = candidate;
-        } else {
-            break;
-        }
-    }
-
-    let shortened = format!("{head}{tail}");
-    if fits(&shortened) {
-        shortened
-    } else {
-        elide_tail(ui, &shortened, budget)
-    }
-}
-
-/// Drop characters from the front, keeping a leading `...`.
-fn elide_tail(ui: &Ui, text: &str, budget: f32) -> String {
-    let mut chars: Vec<char> = text.chars().collect();
-    while !chars.is_empty() {
-        chars.remove(0);
-        let candidate: String = format!("...{}", chars.iter().collect::<String>());
-        if ui.calc_text_size(&candidate)[0] <= budget {
-            return candidate;
-        }
-    }
-    String::new()
 }
 
 /// Minimum time between two accepted hotkey presses.
@@ -203,10 +144,6 @@ impl ToggleKeyState {
     }
 }
 
-fn async_key_down(key: i32) -> bool {
-    (unsafe { GetAsyncKeyState(key) }) as u16 & 0x8000 != 0
-}
-
 struct Dashboard {
     toggle: ToggleKeyState,
     /// Theme the ImGui style was last built for.
@@ -229,6 +166,9 @@ struct Dashboard {
     /// mode the script was *loaded* with. The Compat column says "Reload required" while
     /// the selected mode differs from that one, so switching away and back cancels it.
     reload_pending: HashMap<String, u32>,
+    /// Whether the Logs tab was showing last frame, so that switching to it re-reads the
+    /// log instead of waiting out the refresh interval.
+    logs_shown: bool,
 }
 
 impl Default for Dashboard {
@@ -243,38 +183,22 @@ impl Default for Dashboard {
             log_source: settings::log_source(),
             filter: String::new(),
             reload_pending: HashMap::new(),
+            logs_shown: false,
         }
     }
 }
 
-/// CLEO's directory, where `.cleo_config.ini` and the logs live.
-fn cleo_dir() -> String {
-    let cleo_dir = unsafe { CLEO_GetCleoDirectory() };
-    if cleo_dir.is_null() {
-        ".".to_string()
-    } else {
-        ptr_to_rust_str(cleo_dir).to_string()
+/// Tab labels in on-screen order. The optional tabs only appear when their plugin is loaded.
+fn tab_labels() -> Vec<&'static str> {    let mut labels = vec![strings::tabs::SCRIPTS];
+    if plugins::memory().is_some() {
+        labels.push(strings::tabs::LIBRARIES);
     }
-}
-
-/// The `[Plugins]` section of CLEO's config, which sits next to CLEO.asi.
-fn settings_file_path() -> std::path::PathBuf {
-    std::path::Path::new(&cleo_dir()).join(".cleo_config.ini")
-}
-
-fn make_path_relative_to_exe(path: &str) -> String {
-    if let Ok(current_exe_path) = std::env::current_exe() {
-        if let (Ok(canonical_exe_dir), Ok(canonical_stream_path)) = (
-            current_exe_path.parent().unwrap().canonicalize(),
-            std::path::Path::new(&path).canonicalize(),
-        ) {
-            if let Ok(relative_path) = canonical_stream_path.strip_prefix(&canonical_exe_dir) {
-                return relative_path.to_str().unwrap_or(path).to_string();
-            }
-        }
+    if plugins::audio().is_some() {
+        labels.push(strings::tabs::AUDIO);
     }
-
-    return path.to_string();
+    labels.push(strings::tabs::LOGS);
+    labels.push(strings::tabs::SETTINGS);
+    labels
 }
 
 impl ImguiRenderLoop for Dashboard {
@@ -335,12 +259,26 @@ impl ImguiRenderLoop for Dashboard {
         }
 
         plugins::detect();
-        // Only the log on screen is re-read: the other one costs a file read every half
-        // second for lines nobody is looking at.
-        match self.log_source {
-            0 => self.cleo_log.refresh(),
-            _ => self.script_log.refresh(),
+
+        // Only the log on screen is re-read, and only while the Logs tab is up: on any
+        // other tab that was a half-megabyte file read plus a few thousand strings twice
+        // a second for lines nobody was looking at. Coming back to the tab reads at once
+        // instead of waiting out the interval.
+        let logs_shown =
+            is_open() && tab_labels().get(self.tab).copied() == Some(strings::tabs::LOGS);
+        if logs_shown {
+            if !self.logs_shown {
+                match self.log_source {
+                    0 => self.cleo_log.invalidate(),
+                    _ => self.script_log.invalidate(),
+                }
+            }
+            match self.log_source {
+                0 => self.cleo_log.refresh(),
+                _ => self.script_log.refresh(),
+            }
         }
+        self.logs_shown = logs_shown;
 
         if is_open() && current.freeze_input {
             unsafe { overlay::zero_mouse_delta() };
@@ -378,15 +316,7 @@ impl ImguiRenderLoop for Dashboard {
         let pad = 8.0;
         let inner_width = (width - pad * 2.0).max(320.0);
 
-        let mut labels: Vec<&str> = vec![strings::tabs::SCRIPTS];
-        if plugins::memory().is_some() {
-            labels.push(strings::tabs::LIBRARIES);
-        }
-        if plugins::audio().is_some() {
-            labels.push(strings::tabs::AUDIO);
-        }
-        labels.push(strings::tabs::LOGS);
-        labels.push(strings::tabs::SETTINGS);
+        let labels = tab_labels();
 
         let available_height = (height - pad - 4.0).max(240.0);
         let max_body = (available_height - footer_height - pad * 2.0).max(240.0);
@@ -414,6 +344,7 @@ impl ImguiRenderLoop for Dashboard {
         // come from the content measured here, so the first frame shows everything whole; a
         // column only clips after the user drags it narrower.
         let script_table = |ui: &Ui,
+                            num_scripts: usize,
                             reload_pending: &mut HashMap<String, u32>,
                             filter: &mut String,
                             height: f32| {
@@ -422,13 +353,13 @@ impl ImguiRenderLoop for Dashboard {
             let frame_pad = style.frame_padding[0];
             let width = |text: &str| ui.calc_text_size(text)[0];
 
-            // The absolute path identifies a script across a reload, where the thread
+            // The absolute path identifies a script across a reload, where the script
             // pointer changes; the pending-reload list is keyed on it.
             let abs_path = |i: usize| -> String {
-                let thread = unsafe { CLEO_GetCustomScriptByIndex(i) };
+                let script = unsafe { CLEO_GetCustomScriptByIndex(i) };
                 let mut path = [0i8; 260];
                 unsafe {
-                    CLEO_GetScriptFileFullPath(thread, path.as_mut_ptr(), path.len() as u32)
+                    CLEO_GetScriptFileFullPath(script, path.as_mut_ptr(), path.len() as u32)
                 };
                 ptr_to_rust_str(path.as_ptr() as _).to_string()
             };
@@ -548,6 +479,7 @@ impl ImguiRenderLoop for Dashboard {
                     // One lookup per row: the tooltip, the reload note and the pending-reload
                     // key all go by this path.
                     let absolute = abs_path(i);
+                    let script = unsafe { CLEO_GetCustomScriptByIndex(i) };
                     let has_note = reload_pending.contains_key(&absolute);
                     // A row carrying a "Reload required" note is a line taller, and the
                     // hover band has to cover the row it really is.
@@ -576,8 +508,7 @@ impl ImguiRenderLoop for Dashboard {
                     table::cell(ui, &format!("##_path{}", i), &shown, Colors::Success, &relative);
 
                     ui.table_next_column();
-                    let thread = unsafe { CLEO_GetCustomScriptByIndex(i) };
-                    let size = unsafe { CLEO_GetScriptSize(thread) };
+                    let size = unsafe { CLEO_GetScriptSize(script) };
                     table::cell(
                         ui,
                         &format!("##_size{}", i),
@@ -587,8 +518,7 @@ impl ImguiRenderLoop for Dashboard {
                     );
 
                     ui.table_next_column();
-                    let thread = unsafe { CLEO_GetCustomScriptByIndex(i) };
-                    let version = unsafe { CLEO_GetScriptVersion(thread) };
+                    let version = unsafe { CLEO_GetScriptVersion(script) };
 
                     // Anything older than CLEO 3 has no mode to map onto: show it and leave
                     // it alone instead of silently upgrading it.
@@ -616,7 +546,7 @@ impl ImguiRenderLoop for Dashboard {
                                     let key = absolute.clone();
                                     let loaded = *reload_pending.entry(key.clone()).or_insert(version);
 
-                                    unsafe { CLEO_SetScriptVersion(thread, value) };
+                                    unsafe { CLEO_SetScriptVersion(script, value) };
 
                                     if compat_bucket(value) == compat_bucket(loaded) {
                                         reload_pending.remove(&key);
@@ -631,30 +561,27 @@ impl ImguiRenderLoop for Dashboard {
                     }
 
                     ui.table_next_column();
-                    let thread = unsafe { CLEO_GetCustomScriptByIndex(i) };
-                    let mut enabled = unsafe { CLEO_GetScriptDebugMode(thread) };
+                    let mut enabled = unsafe { CLEO_GetScriptDebugMode(script) };
                     if theme::switch(ui, format!("##_debug{}", i), &mut enabled) {
-                        unsafe { CLEO_SetScriptDebugMode(thread, enabled) };
+                        unsafe { CLEO_SetScriptDebugMode(script, enabled) };
                     }
                     theme::hint(ui, strings::scripts::TIP_DEBUG);
 
                     ui.table_next_column();
-                    let thread = unsafe { CLEO_GetCustomScriptByIndex(i) };
                     // A parked script has its wake time pushed to infinity, so it is skipped
                     // every frame; clearing it lets the script run again next frame.
-                    let mut parked = unsafe { (*thread).m_nWakeTime == 0xFFFFFFFF };
+                    let mut parked = unsafe { (*script).m_nWakeTime == 0xFFFFFFFF };
                     if theme::switch(ui, format!("##_suspended{}", i), &mut parked) {
-                        unsafe { (*thread).m_nWakeTime = if parked { 0xFFFFFFFF } else { 0 } };
+                        unsafe { (*script).m_nWakeTime = if parked { 0xFFFFFFFF } else { 0 } };
                     }
                     theme::hint(ui, strings::scripts::TIP_SUSPENDED);
 
                     ui.table_next_column();
-                    let thread = unsafe { CLEO_GetCustomScriptByIndex(i) };
                     let mut count = 0;
-                    let mut size = 0;
+                    let mut bytes = 0;
                     if let Some(memory) = plugins::memory() {
                         unsafe {
-                            (memory.allocation_info)(thread, &mut count, &mut size);
+                            (memory.allocation_info)(script, &mut count, &mut bytes);
                         }
                     }
 
@@ -667,11 +594,11 @@ impl ImguiRenderLoop for Dashboard {
                             strings::scripts::TIP_MEMORY_NONE,
                         );
                     } else {
-                        let usage = pct(count, max_count).max(pct(size, max_size));
+                        let usage = pct(count, max_count).max(pct(bytes, max_size));
                         table::cell(
                             ui,
                             &format!("##_mem{}", i),
-                            &strings::scripts::memory_cell(count, max_count, &pretty_size(size)),
+                            &strings::scripts::memory_cell(count, max_count, &pretty_size(bytes)),
                             if usage < 50.0 {
                                 Colors::Text
                             } else if usage < 90.0 {
@@ -679,7 +606,7 @@ impl ImguiRenderLoop for Dashboard {
                             } else {
                                 Colors::Error
                             },
-                            &strings::scripts::memory_tooltip(count, max_count, size, max_size),
+                            &strings::scripts::memory_tooltip(count, max_count, bytes, max_size),
                         );
                     }
 
@@ -687,17 +614,16 @@ impl ImguiRenderLoop for Dashboard {
                     // Accent text on no background, like the other buttons in the menu.
                     if theme::flat_button(ui, format!("Dump##{}", i)) {
                         unsafe {
-                            let thread = CLEO_GetCustomScriptByIndex(i);
-                            let size = CLEO_GetScriptSize(thread) as usize;
+                            let size = CLEO_GetScriptSize(script) as usize;
                             if size != 0 {
                                 let mut buf = vec![0u8; size];
                                 let _ = std::ptr::copy_nonoverlapping(
-                                    (*thread).m_nBaseIp as *const u8,
+                                    (*script).m_nBaseIp as *const u8,
                                     buf.as_mut_ptr(),
                                     size,
                                 );
 
-                                let filename = ptr_to_rust_str(CLEO_GetScriptFilename(thread));
+                                let filename = ptr_to_rust_str(CLEO_GetScriptFilename(script));
                                 let _ = std::fs::write(&format!("{}.dump", filename), buf);
                             }
                         };
@@ -707,11 +633,10 @@ impl ImguiRenderLoop for Dashboard {
 
                     if theme::flat_button(ui, format!("Reload##{}", i)) {
                         unsafe {
-                            let thread = CLEO_GetCustomScriptByIndex(i);
                             // The new instance inherits the parent's compatibility mode, so
                             // reloading is what actually applies a compat change.
-                            CLEO_CreateCustomScript(thread, CLEO_GetScriptFilename(thread), 0);
-                            CLEO_TerminateScript(thread);
+                            CLEO_CreateCustomScript(script, CLEO_GetScriptFilename(script), 0);
+                            CLEO_TerminateScript(script);
                         }
                         reload_pending.remove(&absolute);
                     }
@@ -1002,7 +927,13 @@ impl ImguiRenderLoop for Dashboard {
                                 // The tab was sized for the rows it holds; the table scrolls
                                 // inside that if the filter matched more of them.
                                 let height = ui.content_region_avail()[1];
-                                script_table(ui, &mut self.reload_pending, &mut self.filter, height);
+                                script_table(
+                                    ui,
+                                    num_scripts,
+                                    &mut self.reload_pending,
+                                    &mut self.filter,
+                                    height,
+                                );
                             });
                         }
 

@@ -66,25 +66,25 @@ extern "stdcall" {
 
     pub fn CLEO_GetNumberOfCustomScripts() -> usize;
     pub fn CLEO_GetCustomScriptByIndex(index: usize) -> *mut CRunningScript;
-    pub fn CLEO_GetScriptFilename(thread: *const CRunningScript) -> *const i8;
-    pub fn CLEO_GetScriptWorkDir(thread: *const CRunningScript) -> *const i8;
+    pub fn CLEO_GetScriptFilename(script: *const CRunningScript) -> *const i8;
+    pub fn CLEO_GetScriptWorkDir(script: *const CRunningScript) -> *const i8;
 
-    pub fn CLEO_GetScriptVersion(thread: *const CRunningScript) -> u32;
+    pub fn CLEO_GetScriptVersion(script: *const CRunningScript) -> u32;
     // Writes `CCustomScript::m_compatVer`, i.e. the mode the opcode handlers check.
-    pub fn CLEO_SetScriptVersion(thread: *mut CRunningScript, version: u32);
-    pub fn CLEO_GetScriptDebugMode(thread: *const CRunningScript) -> bool;
-    pub fn CLEO_SetScriptDebugMode(thread: *mut CRunningScript, enabled: bool);
+    pub fn CLEO_SetScriptVersion(script: *mut CRunningScript, version: u32);
+    pub fn CLEO_GetScriptDebugMode(script: *const CRunningScript) -> bool;
+    pub fn CLEO_SetScriptDebugMode(script: *mut CRunningScript, enabled: bool);
     // Size of the script in bytes, 0 if unknown.
-    pub fn CLEO_GetScriptSize(thread: *const CRunningScript) -> usize;
+    pub fn CLEO_GetScriptSize(script: *const CRunningScript) -> usize;
     pub fn CLEO_GetScriptInfoStr(
-        thread: *const CRunningScript,
+        script: *const CRunningScript,
         currLineInfo: bool,
         buf: *mut i8,
         bufSize: u32,
     );
 
-    pub fn CLEO_ResolvePath(thread: *mut CRunningScript, inOutPath: *mut i8, pathMaxLen: u32);
-    pub fn CLEO_TerminateScript(thread: *mut CRunningScript);
+    pub fn CLEO_ResolvePath(script: *mut CRunningScript, inOutPath: *mut i8, pathMaxLen: u32);
+    pub fn CLEO_TerminateScript(script: *mut CRunningScript);
     pub fn CLEO_CreateCustomScript(
         fromThread: *mut CRunningScript,
         filePath: *const i8,
@@ -92,5 +92,5 @@ extern "stdcall" {
     ) -> *mut CRunningScript;
 
     // Full absolute path to the script file.
-    pub fn CLEO_GetScriptFileFullPath(thread: *const CRunningScript, buf: *mut i8, bufSize: u32);
+    pub fn CLEO_GetScriptFileFullPath(script: *const CRunningScript, buf: *mut i8, bufSize: u32);
 }
