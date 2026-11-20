@@ -19,8 +19,13 @@ imgui = { version = "0.12.0", features = ["tables-api"] }
 serde = {version = "1", features = ["derive"]}
 serde_json = {version = "1", features = ["preserve_order"]}
 log = { version = "0.4.14", features = ["max_level_trace", "release_max_level_debug"] }
-simplelog = "0.11.2"
 static_assertions = "1.1.0"
 version-compare = "0.1"
 ureq = { version = "2.9", features = ["json"] }
 thiserror = "1.0"
+# The fork is the released 0.9.3 with one change: the DX9 backend pre-transforms the vertices and
+# submits them as `XYZRHW`, so the fixed-function transform stage has nothing to do. That matters
+# on machines without hardware vertex processing, where that stage walks the range of vertices
+# each draw call is told about. See docs/dx9-software-vertex-processing.md.
+[patch.crates-io]
+hudhook = { path = "vendor/hudhook" }

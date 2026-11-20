@@ -15,6 +15,7 @@ use hudhook::windows::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAd
 
 const AUDIO_MODULE: &str = "SA.Audio.cleo";
 const MEMORY_MODULE: &str = "SA.MemoryOperations.cleo";
+const DEBUG_UTILS_MODULE: &str = "SA.DebugUtils.cleo";
 
 /// Grace period after the overlay starts, before the one lookup.
 const DETECT_DELAY_MS: u64 = 2000;
@@ -43,6 +44,7 @@ pub struct MemoryApi {
 
 static AUDIO: Mutex<Option<AudioApi>> = Mutex::new(None);
 static MEMORY: Mutex<Option<MemoryApi>> = Mutex::new(None);
+static DEBUG_UTILS: AtomicBool = AtomicBool::new(false);
 static DONE: AtomicBool = AtomicBool::new(false);
 static STARTED: OnceLock<Instant> = OnceLock::new();
 
@@ -54,6 +56,15 @@ pub fn audio() -> Option<AudioApi> {
 /// `Some` when `SA.MemoryOperations.cleo` is loaded and every symbol resolved.
 pub fn memory() -> Option<MemoryApi> {
     *MEMORY.lock().unwrap()
+}
+
+/// Whether `SA.DebugUtils.cleo` is loaded.
+///
+/// Nothing is called on it: it reads `DebugUtils.*` from the ini and acts on the per-script
+/// debug flag the sidebar writes. Without it that switch would set a value nothing reads,
+/// so the sidebar only offers the switch when the plugin is there.
+pub fn debug_utils() -> bool {
+    DEBUG_UTILS.load(Ordering::Relaxed)
 }
 
 /// Resolve the plugins, once. Called every frame; the lookup itself runs
@@ -73,6 +84,11 @@ pub fn detect() {
     if let Some(api) = unsafe { load_audio() } {
         log::info!("{AUDIO_MODULE} resolved, audio tab enabled");
         *AUDIO.lock().unwrap() = Some(api);
+    }
+
+    if unsafe { module_handle(DEBUG_UTILS_MODULE) }.is_some() {
+        log::info!("{DEBUG_UTILS_MODULE} found, script debug mode switch enabled");
+        DEBUG_UTILS.store(true, Ordering::Relaxed);
     }
 
     if let Some(api) = unsafe { load_memory() } {

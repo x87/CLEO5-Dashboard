@@ -1,7 +1,7 @@
 //! Overlay settings and the descriptor table that renders them.
 //!
-//! Values live in `.cleo_config.ini` (`[Plugins]` section) through the CLEO config API,
-//! so they survive restarts and can be edited by hand:
+//! Values live in `.cleo_config.ini` (`[Plugins]` section) through the CLEO config API, so
+//! they survive restarts and can be edited by hand:
 //!
 //! ```ini
 //! [Plugins]
@@ -29,11 +29,14 @@ const K_FREEZE_INPUT: &str = "Dashboard.General.FreezeInput";
 const K_RELEASE_CURSOR: &str = "Dashboard.General.ReleaseCursor";
 const K_SHOW_FPS: &str = "Dashboard.General.ShowFps";
 const K_OPEN_ON_START: &str = "Dashboard.General.OpenOnStart";
-/// Which log the Logs tab shows. Not in [`SCHEMA`]: it is UI state, remembered without a
-/// row on the Settings page.
+const K_HIGHLIGHT: &str = "Dashboard.General.Highlight";
+/// Which log the Logs tab shows. Not in [`SCHEMA`]: it is UI state, remembered without a row
+/// on the Settings page.
 const K_LOG_SOURCE: &str = "Dashboard.General.LogSource";
 
-pub const DEFAULT_TOGGLE_KEY: u8 = 0x2D; // Insert
+/// The key the menu opens and closes on out of the box. Backtick is the one key the
+/// alphabet, the digits and the punctuation row do without.
+pub const DEFAULT_TOGGLE_KEY: u8 = 0xC0;
 
 /// One entry of the hotkey dropdown; the value is a virtual-key code.
 pub struct ToggleKey {
@@ -43,8 +46,7 @@ pub struct ToggleKey {
 
 /// Every key the US layout has that is safe to grab: the alphabet, the digits, the
 /// punctuation row, F1-F12, CapsLock and the navigation cluster. `Esc` is left out on
-/// purpose - it is the one key the game always needs (pause menu, aborting cutscenes).
-/// Arrows and the numpad are skipped too; they belong to the game.
+/// purpose (the game always needs it), as are the arrows and the numpad.
 pub const TOGGLE_KEYS: &[ToggleKey] = &[
     // navigation cluster and locks
     ToggleKey { label: "Insert", vk: 0x2D },
@@ -106,7 +108,7 @@ pub const TOGGLE_KEYS: &[ToggleKey] = &[
     ToggleKey { label: "Y", vk: 0x59 },
     ToggleKey { label: "Z", vk: 0x5A },
     // punctuation, in US layout order
-    ToggleKey { label: "` (grave)", vk: 0xC0 },
+    ToggleKey { label: "` (backtick)", vk: 0xC0 },
     ToggleKey { label: "- (minus)", vk: 0xBD },
     ToggleKey { label: "= (equals)", vk: 0xBB },
     ToggleKey { label: "[ (left bracket)", vk: 0xDB },
@@ -130,6 +132,8 @@ pub struct Settings {
     pub release_cursor: bool,
     pub show_fps: bool,
     pub open_on_start: bool,
+    /// Colour log and trace lines by what their parts are.
+    pub highlight: bool,
 }
 
 impl Default for Settings {
@@ -143,6 +147,7 @@ impl Default for Settings {
             release_cursor: true,
             show_fps: true,
             open_on_start: false,
+            highlight: false,
         }
     }
 }
@@ -161,6 +166,7 @@ impl Settings {
             release_cursor: cfg_get_int(K_RELEASE_CURSOR, defaults.release_cursor as i32) != 0,
             show_fps: cfg_get_int(K_SHOW_FPS, defaults.show_fps as i32) != 0,
             open_on_start: cfg_get_int(K_OPEN_ON_START, defaults.open_on_start as i32) != 0,
+            highlight: cfg_get_int(K_HIGHLIGHT, defaults.highlight as i32) != 0,
         }
     }
 
@@ -174,6 +180,7 @@ impl Settings {
         cfg_set_int(K_RELEASE_CURSOR, self.release_cursor as i32);
         cfg_set_int(K_SHOW_FPS, self.show_fps as i32);
         cfg_set_int(K_OPEN_ON_START, self.open_on_start as i32);
+        cfg_set_int(K_HIGHLIGHT, self.highlight as i32);
     }
 
     pub fn toggle_key_label(&self) -> String {
@@ -183,13 +190,29 @@ impl Settings {
             .map(|k| k.label.to_string())
             .unwrap_or_else(|| format!("0x{:02X}", self.toggle_key))
     }
+
+    /// The bool behind a switch row, if the row is a switch.
+    fn flag_mut(&mut self, setting: Setting) -> Option<&mut bool> {
+        Some(match setting {
+            Setting::FreezeInput => &mut self.freeze_input,
+            Setting::ReleaseCursor => &mut self.release_cursor,
+            Setting::ShowFps => &mut self.show_fps,
+            Setting::OpenOnStart => &mut self.open_on_start,
+            Setting::Highlight => &mut self.highlight,
+            _ => return None,
+        })
+    }
 }
 
 // ------------------------------------------------------------ script tracing
 
-/// CLEO's script-tracing levels as the `DebugUtils` plugin's
+/// CLEO's script-tracing levels, as the `DebugUtils` plugin's
 /// `Plugins.DebugUtils.ScriptLog.Enabled` switch understands them.
-pub const TRACING_LEVELS: [(&str, i32); 3] = [(strings::logs::TRACING_OFF, 0), (strings::logs::TRACING_ON_CRASH, 1), (strings::logs::TRACING_FULL, 2)];
+pub const TRACING_LEVELS: [(&str, i32); 3] = [
+    (strings::logs::TRACING_OFF, 0),
+    (strings::logs::TRACING_ON_CRASH, 1),
+    (strings::logs::TRACING_FULL, 2),
+];
 
 const K_TRACING: &str = "DebugUtils.ScriptLog.Enabled";
 
@@ -207,6 +230,86 @@ pub fn tracing_label(level: i32) -> &'static str {
         .unwrap_or(strings::logs::TRACING_OFF)
 }
 
+// -------------------------------------------------------------- script debug
+
+// The debug view's own switches. They are not rows on the Settings page: they belong to the
+// debug window and are written here so a session keeps the layout it was left with.
+const K_DEBUG_ENABLED: &str = "Dashboard.Debug.Enabled";
+const K_DEBUG_NATIVE: &str = "Dashboard.Debug.AllowNativeControl";
+const K_DEBUG_COMPACT: &str = "Dashboard.Debug.Compact";
+const K_DEBUG_FIELDS: &str = "Dashboard.Debug.ShowFields";
+const K_DEBUG_SPLIT: &str = "Dashboard.Debug.SplitPercent";
+const K_DEBUG_X: &str = "Dashboard.Debug.WindowX";
+const K_DEBUG_Y: &str = "Dashboard.Debug.WindowY";
+const K_DEBUG_W: &str = "Dashboard.Debug.WindowWidth";
+const K_DEBUG_H: &str = "Dashboard.Debug.WindowHeight";
+
+/// Whether the opcode callbacks are registered at all. Read once, at startup: turning it
+/// off takes effect on the next load of the overlay.
+pub fn debug_enabled() -> bool {
+    cfg_get_int(K_DEBUG_ENABLED, 1) != 0
+}
+
+/// Whether Pause/Step may park a mission script. Off by default: parking one of those
+/// mid-mission leaves the mission state inconsistent.
+pub fn allow_native_control() -> bool {
+    cfg_get_int(K_DEBUG_NATIVE, 0) != 0
+}
+
+/// Where the debugger window was left, as `[x, y, width, height]`; `None` until it has been
+/// moved or resized once. One geometry for every debugger window rather than one per script.
+pub fn debug_window() -> Option<[f32; 4]> {
+    let width = cfg_get_int(K_DEBUG_W, 0);
+    let height = cfg_get_int(K_DEBUG_H, 0);
+    if width < 240 || height < 200 {
+        return None;
+    }
+
+    Some([
+        cfg_get_int(K_DEBUG_X, 0) as f32,
+        cfg_get_int(K_DEBUG_Y, 0) as f32,
+        width as f32,
+        height as f32,
+    ])
+}
+
+pub fn set_debug_window(rect: [f32; 4]) {
+    cfg_set_int(K_DEBUG_X, rect[0].round() as i32);
+    cfg_set_int(K_DEBUG_Y, rect[1].round() as i32);
+    cfg_set_int(K_DEBUG_W, rect[2].round() as i32);
+    cfg_set_int(K_DEBUG_H, rect[3].round() as i32);
+}
+
+/// Whether the trace shows compact lines.
+pub fn debug_compact() -> bool {
+    cfg_get_int(K_DEBUG_COMPACT, 0) != 0
+}
+
+pub fn set_debug_compact(compact: bool) {
+    cfg_set_int(K_DEBUG_COMPACT, compact as i32);
+}
+
+/// Where the debugger's split between the listing and the variables sits, as a fraction of
+/// the pane width.
+pub fn debug_split() -> f32 {
+    let percent = cfg_get_int(K_DEBUG_SPLIT, 58).clamp(25, 80);
+    percent as f32 / 100.0
+}
+
+pub fn set_debug_split(split: f32) {
+    cfg_set_int(K_DEBUG_SPLIT, (split.clamp(0.25, 0.80) * 100.0).round() as i32);
+}
+
+/// Whether the debugger shows the fields/flags panel. Off by default: it is as tall as the
+/// pane above it, and the pane above it is what the window is for.
+pub fn debug_fields() -> bool {
+    cfg_get_int(K_DEBUG_FIELDS, 0) != 0
+}
+
+pub fn set_debug_fields(show: bool) {
+    cfg_set_int(K_DEBUG_FIELDS, show as i32);
+}
+
 /// Which log the Logs tab was showing when the menu last closed: an index into
 /// [`logtail::LOG_SOURCES`].
 pub fn log_source() -> usize {
@@ -220,24 +323,136 @@ pub fn set_log_source(source: usize) {
     cfg_set_int(K_LOG_SOURCE, source.min(last) as i32);
 }
 
+/// Which optional columns the script table shows. The first two, the row number and the
+/// path, are always there: a table without them is not a table.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ScriptColumn {
+    Status,
+    Mode,
+    Size,
+    Memory,
+}
+
+impl ScriptColumn {
+    /// In table order.
+    pub const ALL: [ScriptColumn; 4] = [
+        ScriptColumn::Status,
+        ScriptColumn::Size,
+        ScriptColumn::Memory,
+        ScriptColumn::Mode,
+    ];
+
+    /// The caption in the column picker, which is the table's own header.
+    pub fn label(self) -> &'static str {
+        match self {
+            ScriptColumn::Status => crate::strings::scripts::HEADER_STATUS,
+            ScriptColumn::Mode => crate::strings::scripts::HEADER_MODE,
+            ScriptColumn::Size => crate::strings::scripts::HEADER_SIZE,
+            ScriptColumn::Memory => crate::strings::scripts::HEADER_MEMORY,
+        }
+    }
+
+    /// The config key suffix, so a renamed caption does not lose the setting.
+    fn key(self) -> &'static str {
+        match self {
+            ScriptColumn::Status => "Dashboard.Scripts.ColumnStatus",
+            ScriptColumn::Mode => "Dashboard.Scripts.ColumnMode",
+            ScriptColumn::Size => "Dashboard.Scripts.ColumnSize",
+            ScriptColumn::Memory => "Dashboard.Scripts.ColumnMemory",
+        }
+    }
+}
+
+/// Whether a column is shown. On unless the user turned it off in the column picker.
+pub fn script_column(column: ScriptColumn) -> bool {
+    cfg_get_int(column.key(), 1) != 0
+}
+
+pub fn set_script_column(column: ScriptColumn, shown: bool) {
+    cfg_set_int(column.key(), shown as i32);
+}
+
+/// The rest of the DebugUtils script log's keys, in the plugin's own order.
+///
+/// The plugin reads them in `ScriptLog::LoadConfig`, which runs when logging starts, so a
+/// new value lands the next time the level changes or the next save load.
+const K_LOG_MAX_SIZE: &str = "DebugUtils.ScriptLog.MaxSize";
+const K_LOG_CUSTOM_ONLY: &str = "DebugUtils.ScriptLog.OnlyCustomScripts";
+const K_LOG_DEBUG_ONLY: &str = "DebugUtils.ScriptLog.OnlyDebugScripts";
+const K_LOG_OFFSETS: &str = "DebugUtils.ScriptLog.Offsets";
+const K_LOG_OPCODES: &str = "DebugUtils.ScriptLog.Opcodes";
+
+/// What `OnlyCustomScripts` can be: the plugin's `-1` is its "decide from the game state".
+pub const LOG_SCOPE_LEVELS: [(&str, i32); 3] = [
+    (strings::logs::LOG_SCOPE_AUTO, -1),
+    (strings::logs::LOG_SCOPE_ALL, 0),
+    (strings::logs::LOG_SCOPE_CUSTOM, 1),
+];
+
+pub fn log_scope_label(scope: i32) -> &'static str {
+    LOG_SCOPE_LEVELS
+        .iter()
+        .find(|(_, value)| *value == scope)
+        .map(|(label, _)| *label)
+        .unwrap_or(strings::logs::LOG_SCOPE_AUTO)
+}
+
+/// Log file size cap in megabytes, `0` for no cap.
+pub fn log_max_size() -> i32 {
+    cfg_get_int(K_LOG_MAX_SIZE, 250).clamp(0, 4096)
+}
+
+pub fn set_log_max_size(megabytes: i32) {
+    cfg_set_int(K_LOG_MAX_SIZE, megabytes.clamp(0, 4096));
+}
+
+pub fn log_custom_only() -> i32 {
+    cfg_get_int(K_LOG_CUSTOM_ONLY, -1).clamp(-1, 1)
+}
+
+pub fn set_log_custom_only(scope: i32) {
+    cfg_set_int(K_LOG_CUSTOM_ONLY, scope.clamp(-1, 1));
+}
+
+pub fn log_debug_only() -> bool {
+    cfg_get_int(K_LOG_DEBUG_ONLY, 0) != 0
+}
+
+pub fn set_log_debug_only(only: bool) {
+    cfg_set_int(K_LOG_DEBUG_ONLY, only as i32);
+}
+
+pub fn log_offsets() -> bool {
+    cfg_get_int(K_LOG_OFFSETS, 1) != 0
+}
+
+pub fn set_log_offsets(on: bool) {
+    cfg_set_int(K_LOG_OFFSETS, on as i32);
+}
+
+pub fn log_opcodes() -> bool {
+    cfg_get_int(K_LOG_OPCODES, 0) != 0
+}
+
+pub fn set_log_opcodes(on: bool) {
+    cfg_set_int(K_LOG_OPCODES, on as i32);
+}
+
 /// Persist a new tracing level.
 ///
-/// The write goes through `CLEO_SetConfigInt`, which fires CLEO's `ConfigUpdate`
-/// callback; the DebugUtils plugin listens and applies the change to the running session.
+/// The write goes through `CLEO_SetConfigInt`, which fires the `ConfigUpdate` callbacks; the
+/// DebugUtils plugin's script log listens for it, re-reads the level and switches its hooks at
+/// the end of the frame, so a new level applies while the game is running.
 pub fn set_tracing_level(level: i32) {
     cfg_set_int(K_TRACING, level.clamp(0, 2));
 }
 
-/// Slider value being dragged; committed once the user releases the slider.
+/// Slider value being dragged, committed once the user releases the slider.
 static PENDING_SCALE: Mutex<Option<f32>> = Mutex::new(None);
 
-/// Set while the opacity slider is being dragged, so the commit on release only happens
-/// for a real edit and not for a stray item-deactivated frame.
+/// Set while the opacity slider is being dragged, so the commit on release only happens for
+/// a real edit.
 static OPACITY_DIRTY: AtomicBool = AtomicBool::new(false);
-
-fn pending_scale() -> &'static Mutex<Option<f32>> {
-    &PENDING_SCALE
-}
 
 static SETTINGS: OnceLock<Mutex<Settings>> = OnceLock::new();
 
@@ -269,6 +484,7 @@ pub fn apply(settings: Settings) {
     overlay::FREEZE_INPUT.store(settings.freeze_input, std::sync::atomic::Ordering::Relaxed);
 }
 
+
 // ---------------------------------------------------------------- descriptors
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -281,108 +497,165 @@ pub enum Setting {
     ReleaseCursor,
     ShowFps,
     OpenOnStart,
+    Highlight,
+}
+
+/// The caption a group of rows is drawn under.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Section {
+    Appearance,
+    Behaviour,
+}
+
+impl Section {
+    pub fn label(self) -> &'static str {
+        match self {
+            Section::Appearance => strings::settings::SECTION_APPEARANCE,
+            Section::Behaviour => strings::settings::SECTION_BEHAVIOUR,
+        }
+    }
 }
 
 pub struct SettingDef {
     pub setting: Setting,
+    pub section: Section,
     pub label: &'static str,
     pub tooltip: &'static str,
 }
 
-/// Order here is the order on screen.
+const fn def(
+    setting: Setting,
+    section: Section,
+    label: &'static str,
+    tooltip: &'static str,
+) -> SettingDef {
+    SettingDef {
+        setting,
+        section,
+        label,
+        tooltip,
+    }
+}
+
+/// The rows in on-screen order. A section caption is drawn wherever `section` changes.
 pub static SCHEMA: &[SettingDef] = &[
-    SettingDef {
-        setting: Setting::Theme,
-        label: strings::settings::THEME,
-        tooltip: strings::settings::TIP_THEME,
-    },
-    SettingDef {
-        setting: Setting::ToggleKey,
-        label: strings::settings::TOGGLE_KEY,
-        tooltip: strings::settings::TIP_TOGGLE_KEY,
-    },
-    SettingDef {
-        setting: Setting::UiScale,
-        label: strings::settings::UI_SCALE,
-        tooltip: strings::settings::TIP_UI_SCALE,
-    },
-    SettingDef {
-        setting: Setting::MenuOpacity,
-        label: strings::settings::MENU_OPACITY,
-        tooltip: strings::settings::TIP_MENU_OPACITY,
-    },
-    SettingDef {
-        setting: Setting::FreezeInput,
-        label: strings::settings::FREEZE_INPUT,
-        tooltip: strings::settings::TIP_FREEZE_INPUT,
-    },
-    SettingDef {
-        setting: Setting::ReleaseCursor,
-        label: strings::settings::RELEASE_CURSOR,
-        tooltip: strings::settings::TIP_RELEASE_CURSOR,
-    },
-    SettingDef {
-        setting: Setting::ShowFps,
-        label: strings::settings::SHOW_FPS,
-        tooltip: strings::settings::TIP_SHOW_FPS,
-    },
-    SettingDef {
-        setting: Setting::OpenOnStart,
-        label: strings::settings::OPEN_ON_START,
-        tooltip: strings::settings::TIP_OPEN_ON_START,
-    },
+    def(
+        Setting::Theme,
+        Section::Appearance,
+        strings::settings::THEME,
+        strings::settings::TIP_THEME,
+    ),
+    def(
+        Setting::ToggleKey,
+        Section::Appearance,
+        strings::settings::TOGGLE_KEY,
+        strings::settings::TIP_TOGGLE_KEY,
+    ),
+    def(
+        Setting::UiScale,
+        Section::Appearance,
+        strings::settings::UI_SCALE,
+        strings::settings::TIP_UI_SCALE,
+    ),
+    def(
+        Setting::MenuOpacity,
+        Section::Appearance,
+        strings::settings::MENU_OPACITY,
+        strings::settings::TIP_MENU_OPACITY,
+    ),
+    def(
+        Setting::FreezeInput,
+        Section::Behaviour,
+        strings::settings::FREEZE_INPUT,
+        strings::settings::TIP_FREEZE_INPUT,
+    ),
+    def(
+        Setting::ReleaseCursor,
+        Section::Behaviour,
+        strings::settings::RELEASE_CURSOR,
+        strings::settings::TIP_RELEASE_CURSOR,
+    ),
+    def(
+        Setting::ShowFps,
+        Section::Behaviour,
+        strings::settings::SHOW_FPS,
+        strings::settings::TIP_SHOW_FPS,
+    ),
+    def(
+        Setting::OpenOnStart,
+        Section::Behaviour,
+        strings::settings::OPEN_ON_START,
+        strings::settings::TIP_OPEN_ON_START,
+    ),
+    def(
+        Setting::Highlight,
+        Section::Behaviour,
+        strings::highlight::LABEL,
+        strings::highlight::TIP,
+    ),
 ];
+
+/// The sections in draw order, with the number of rows in each.
+pub fn sections() -> Vec<(Section, usize)> {
+    let mut sections: Vec<(Section, usize)> = Vec::new();
+    for def in SCHEMA {
+        match sections.last_mut() {
+            Some((section, rows)) if *section == def.section => *rows += 1,
+            _ => sections.push((def.section, 1)),
+        }
+    }
+    sections
+}
 
 /// Render one descriptor against `settings`. Returns whether the value changed.
 pub fn row(ui: &Ui, settings: &mut Settings, def: &SettingDef) -> bool {
+    labeled(ui, def.label);
+
     match def.setting {
         Setting::Theme => {
-            labeled_text(ui, def.label);
-            ui.set_next_item_width(210.0);
-
             let current = theme::Theme::from_int(settings.theme);
             let mut changed = false;
-            if let Some(_token) = ui.begin_combo(format!("##{}", def.label), current.label()) {
-                for (index, label) in theme::Theme::ALL.iter().enumerate() {
-                    let selected = settings.theme == index as i32;
-                    if ui.selectable_config(*label).selected(selected).build() {
-                        settings.theme = index as i32;
-                        changed = true;
+            theme::dropdown(
+                ui,
+                &format!("setting_{}", def.label),
+                current.label(),
+                def.tooltip,
+                || {
+                    for (index, label) in theme::Theme::ALL.iter().enumerate() {
+                        let selected = settings.theme == index as i32;
+                        if ui.selectable_config(*label).selected(selected).build() {
+                            settings.theme = index as i32;
+                            changed = true;
+                        }
                     }
-                }
-            }
-            hint(ui, def.tooltip);
+                },
+            );
             changed
         }
         Setting::ToggleKey => {
-            labeled_text(ui, def.label);
             let mut changed = false;
-            ui.set_next_item_width(210.0);
-            // A taller popup than the default eight rows: the list holds the whole US
-            // layout, and scrolling eight entries at a time was the slowest part of
-            // picking a key.
-            if let Some(_token) = ui.begin_combo_with_flags(
-                format!("##{}", def.label),
-                settings.toggle_key_label(),
-                imgui::ComboBoxFlags::HEIGHT_LARGE,
-            ) {
-                for key in TOGGLE_KEYS {
-                    let selected = settings.toggle_key == key.vk as i32;
-                    if ui
-                        .selectable_config(key.label)
-                        .selected(selected)
-                        .build()
-                    {
-                        settings.toggle_key = key.vk as i32;
-                        changed = true;
+            theme::dropdown(
+                ui,
+                &format!("setting_{}", def.label),
+                &settings.toggle_key_label(),
+                def.tooltip,
+                || {
+                    for key in TOGGLE_KEYS {
+                        let selected = settings.toggle_key == key.vk as i32;
+                        if ui
+                            .selectable_config(key.label)
+                            .selected(selected)
+                            .build()
+                        {
+                            settings.toggle_key = key.vk as i32;
+                            changed = true;
+                        }
                     }
-                }
-            }
-            hint(ui, def.tooltip);
+                },
+            );
             changed
         }
         Setting::UiScale => {
-            labeled_text(ui, def.label);
             ui.set_next_item_width(210.0);
 
             let mut value = settings.ui_scale;
@@ -392,17 +665,17 @@ pub fn row(ui: &Ui, settings: &mut Settings, def: &SettingDef) -> bool {
 
             let dragging = ui.is_item_active();
             let released = ui.is_item_deactivated_after_edit();
-            hint(ui, def.tooltip);
+            theme::hint(ui, def.tooltip);
 
             // Rescaling the font atlas every frame while the slider is dragged makes the
-            // whole menu jitter, so keep the committed scale until the user lets go.
+            // whole menu jitter, so the scale only commits on release.
             if dragging {
-                if let Ok(mut pending) = pending_scale().lock() {
+                if let Ok(mut pending) = PENDING_SCALE.lock() {
                     *pending = Some(value);
                 }
                 false
             } else if released {
-                let committed = pending_scale()
+                let committed = PENDING_SCALE
                     .lock()
                     .ok()
                     .and_then(|mut pending| pending.take())
@@ -415,7 +688,6 @@ pub fn row(ui: &Ui, settings: &mut Settings, def: &SettingDef) -> bool {
             }
         }
         Setting::MenuOpacity => {
-            labeled_text(ui, def.label);
             ui.set_next_item_width(210.0);
 
             let mut value = settings.menu_opacity;
@@ -424,79 +696,47 @@ pub fn row(ui: &Ui, settings: &mut Settings, def: &SettingDef) -> bool {
                 .display_format("%.2f")
                 .build(&mut value);
 
-            // Read the item state before `hint`: a tooltip is a window of its own and
-            // would leave "last item" pointing at its text instead of the slider.
+            // Read the item state before `hint`: a tooltip is a window of its own and would
+            // leave "last item" pointing at its text instead of the slider.
             let released = ui.is_item_deactivated_after_edit();
-            hint(ui, def.tooltip);
+            theme::hint(ui, def.tooltip);
 
-            // Alpha costs nothing to change, so preview it live and persist on release -
-            // the same write-on-release rule the UI scale slider follows, except that the
-            // visual update is not deferred.
             if edited {
                 settings.menu_opacity = (value * 100.0).round() / 100.0;
                 preview(*settings);
                 OPACITY_DIRTY.store(true, Ordering::Relaxed);
             }
 
-            // Only consume the flag on the release frame: the edit happens on the frame
-            // the mouse goes down, the release a few frames later.
-            let dirty = released && OPACITY_DIRTY.swap(false, Ordering::Relaxed);
-            dirty
+            released && OPACITY_DIRTY.swap(false, Ordering::Relaxed)
         }
-        Setting::FreezeInput => {
-            labeled_checkbox(ui, def.label, def.tooltip, &mut settings.freeze_input)
-        }
-        Setting::ReleaseCursor => {
-            labeled_checkbox(ui, def.label, def.tooltip, &mut settings.release_cursor)
-        }
-        Setting::ShowFps => labeled_checkbox(ui, def.label, def.tooltip, &mut settings.show_fps),
-        Setting::OpenOnStart => {
-            labeled_checkbox(ui, def.label, def.tooltip, &mut settings.open_on_start)
+        setting => {
+            let Some(value) = settings.flag_mut(setting) else {
+                return false;
+            };
+            let changed = theme::switch(ui, format!("##{}", def.label), value);
+            theme::hint(ui, def.tooltip);
+            changed
         }
     }
 }
 
-/// Labels that are not settings but share the label column (the Storage rows).
-pub const EXTRA_LABELS: [&str; 1] = [strings::settings::LABEL_SETTINGS_FILE];
-
-/// Width of the label column in pixels: the widest label in the tab plus a gap.
-/// Measured at runtime so it follows the font and the UI scale; `{:<24}` did not,
-/// because a proportional font has no fixed character width.
+/// Width of the label column: the widest label plus a gap. Measured at run time so it
+/// follows the font and the UI scale.
 fn label_column(ui: &Ui) -> f32 {
-    let widest = SCHEMA
+    SCHEMA
         .iter()
-        .map(|def| def.label)
-        .chain(EXTRA_LABELS)
-        .map(|label| ui.calc_text_size(label)[0])
-        .fold(0.0_f32, f32::max);
-
-    widest + 24.0
+        .map(|def| ui.calc_text_size(def.label)[0])
+        .fold(0.0_f32, f32::max)
+        + 24.0
 }
 
 /// Print a label in the label column and move the cursor to the control column, so every
-/// control in the tab starts at the same x.
-pub fn labeled(ui: &Ui, label: &str) {
-    let column = label_column(ui);
+/// control on the page starts at the same x.
+fn labeled(ui: &Ui, label: &str) {
     let start = ui.cursor_pos()[0];
-
     ui.align_text_to_frame_padding();
-    ui.text(label);
-    ui.same_line_with_pos(start + column);
-}
-
-fn labeled_text(ui: &Ui, label: &str) {
-    labeled(ui, label);
-}
-
-fn labeled_checkbox(ui: &Ui, label: &str, tooltip: &str, value: &mut bool) -> bool {
-    labeled(ui, label);
-    let changed = theme::switch(ui, format!("##{}", label), value);
-    hint(ui, tooltip);
-    changed
-}
-
-fn hint(ui: &Ui, tooltip: &str) {
-    theme::hint(ui, tooltip);
+    ui.text_colored(theme::Role::Dim.rgba(1.0), label);
+    ui.same_line_with_pos(start + label_column(ui));
 }
 
 // ------------------------------------------------------------- config helpers
@@ -529,30 +769,8 @@ fn cfg_set_float(key: &str, value: f32) {
     }
 }
 
-#[allow(dead_code)]
-fn cfg_get_text(key: &str, default: &str) -> String {
-    let key_c = cs(key);
-    let default_c = cs(default);
-    let mut buffer = [0i8; 512];
-    unsafe {
-        CLEO_GetConfigText(
-            key_c.as_ptr(),
-            default_c.as_ptr(),
-            buffer.as_mut_ptr(),
-            buffer.len() as u32,
-        );
-    }
-
-    unsafe { std::ffi::CStr::from_ptr(buffer.as_ptr()) }
-        .to_string_lossy()
-        .into_owned()
+/// Whether log and trace lines are coloured by what their parts are.
+pub fn highlight() -> bool {
+    get().highlight
 }
 
-#[allow(dead_code)]
-fn cfg_set_text(key: &str, value: &str) {
-    let key_c = cs(key);
-    let value_c = cs(value);
-    unsafe {
-        CLEO_SetConfigText(key_c.as_ptr(), value_c.as_ptr());
-    }
-}
