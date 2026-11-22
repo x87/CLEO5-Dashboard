@@ -1,6 +1,6 @@
 [package]
 name = "cleo5-dashboard"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2021"
 description = "In-game dashboard for CLEO 5 on GTA San Andreas"
 license = "MIT"

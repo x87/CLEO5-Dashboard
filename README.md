@@ -1,6 +1,7 @@
 # CLEO5 Dashboard
+[![Discord](https://img.shields.io/discord/911487285990674473?style=for-the-badge)](https://cleo.li/discord)
 
-An in-game overlay for CLEO 5 (GTA San Andreas 1.0 US).
+An in-game overlay for CLEO 5 (GTA San Andreas 1.0 US). 
 
 Press **`** (backtick, rebindable) to open and close it.
 
