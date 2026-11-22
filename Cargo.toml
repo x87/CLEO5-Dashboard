@@ -4,7 +4,7 @@ version = "0.2.0"
 edition = "2021"
 description = "In-game dashboard for CLEO 5 on GTA San Andreas"
 license = "MIT"
-repository = "https://github.com/cleolibrary/cleo5-dashboard"
+repository = "https://github.com/x87/CLEO5-Dashboard"
 
 [lib]
 crate-type = ["rlib", "cdylib"]
@@ -23,5 +23,6 @@ static_assertions = "1.1.0"
 version-compare = "0.1"
 ureq = { version = "2.9", features = ["json"] }
 thiserror = "1.0"
+
 [patch.crates-io]
 hudhook = { git = "https://github.com/x87/hudhook", rev = "f4727801b15dd3ed4de1995ca3ac8ed5a2a673e4" }

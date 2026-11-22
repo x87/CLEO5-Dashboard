@@ -7,6 +7,6 @@
 - added search in the log content with highlighting
 - added more options to customize script log output
 
-## 0.1.0
+## 0.1.2
 
 - initial release 

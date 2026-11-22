@@ -55,9 +55,10 @@ jobs:
           prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}
           generateReleaseNotes: true
           body: |
-            Built for Windows 7 and newer;
+            ## Installation
+            Copy `SA.Dashboard.cleo` into `GTA San Andreas\CLEO\CLEO_PLUGINS\`.
+            Press **` (backtick)** in game to open the menu.
 
-            **Install:** copy `SA.Dashboard.cleo` into `GTA San Andreas\CLEO\CLEO_PLUGINS\`.
-            Press **Insert** in game to open the menu.
+            [CLEO 5.5.1+](https://github.com/cleolibrary/CLEO5/releases) is required.
           artifacts: "SA.Dashboard.cleo"
           allowUpdates: true
