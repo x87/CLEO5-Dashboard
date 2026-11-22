@@ -5,10 +5,12 @@ An in-game overlay for CLEO 5 (GTA San Andreas 1.0 US).
 
 Press **`** (backtick, rebindable) to open and close it.
 
-<img width="640" height="480" alt="image" src="https://github.com/user-attachments/assets/ec27f9ce-1c70-41d3-a155-421d1fdfc3a3" /> <img width="640" height="480" alt="image" src="https://github.com/user-attachments/assets/2fe9dec8-0f10-4982-96dc-19751d855c2c" />
+<img width="640" height="360" alt="image" src="https://github.com/user-attachments/assets/cb4586ae-a07c-4f59-a6ed-57d6494bc26d" />
+
+## Trailer 
+[![Watch trailer](https://github.com/user-attachments/assets/b0c1efbb-b666-4cfd-9f62-f7a24200b3ab)](https://www.youtube.com/watch?v=_EIoOoPcVZs)
 
 ## Tabs
-
 - **Scripts** - loaded scripts, including game's native scripts, with filters and extra info. Includes a debugger with live trace and stepping through the code functionality.
 - **Libraries** - loaded modules, including `.asi`, `.dll`, `.cleo` and other libraries.
 - **Audio** - active CLEO audio streams with their stats. Needs `SA.Audio.cleo`.
