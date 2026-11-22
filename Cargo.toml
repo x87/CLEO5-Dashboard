@@ -23,9 +23,5 @@ static_assertions = "1.1.0"
 version-compare = "0.1"
 ureq = { version = "2.9", features = ["json"] }
 thiserror = "1.0"
-# The fork is the released 0.9.3 with one change: the DX9 backend pre-transforms the vertices and
-# submits them as `XYZRHW`, so the fixed-function transform stage has nothing to do. That matters
-# on machines without hardware vertex processing, where that stage walks the range of vertices
-# each draw call is told about. See docs/dx9-software-vertex-processing.md.
 [patch.crates-io]
-hudhook = { path = "vendor/hudhook" }
+hudhook = { git = "https://github.com/x87/hudhook", rev = "f4727801b15dd3ed4de1995ca3ac8ed5a2a673e4" }

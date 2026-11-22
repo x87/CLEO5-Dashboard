@@ -164,6 +164,7 @@ checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 [[package]]
 name = "hudhook"
 version = "0.9.3"
+source = "git+https://github.com/x87/hudhook?rev=f4727801b15dd3ed4de1995ca3ac8ed5a2a673e4#f4727801b15dd3ed4de1995ca3ac8ed5a2a673e4"
 dependencies = [
  "bitflags 2.9.3",
  "cc",
