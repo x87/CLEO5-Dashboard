@@ -18,9 +18,36 @@ Press **`** (backtick, rebindable) to open and close it.
 - **Libraries** - loaded modules, including `.asi`, `.dll`, `.cleo` and other libraries.
 - **Audio** - active CLEO audio streams with their stats. Needs `SA.Audio.cleo`.
 - **Logs** - live read of `cleo.log` or `cleo_script.log`, with auto-scroll.
-- **Settings** - theme, UI scale, menu opacity, the hotkey, and other options. Stored in `CLEO/.cleo_config.ini` under `[Plugins]`, so you can also edit them manually.
+- **Settings** - theme, UI scale, menu opacity, the hotkey, and other options. Changes are persistent (See [Settings](#Settings)).
 
 The overlay renders with [hudhook](https://github.com/veeenu/hudhook) (D3D9).
+
+## Settings
+
+Values live in `[Plugins]` of `CLEO/.cleo_config.ini`:
+
+| Key                               | Default                                              | Meaning                                                                  |
+| --------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------ |
+| `Dashboard.General.Theme`         | 2                                                    | theme index: 0 = Blue, 1 = Purple, 2 = Orange                            |
+| `Dashboard.General.ToggleKey`     | [Backtick](https://en.wikipedia.org/wiki/Backtick) ` | Normally right above the Tab button, may vary depending on your keyboard |
+| `Dashboard.General.UiScale`       | 1.0                                                  | UI scale, 0.5-2.0                                                        |
+| `Dashboard.General.MenuOpacity`   | 0.9                                                  | menu opacity, 0.15-1.0                                                   |
+| `Dashboard.General.FreezeInput`   | 1                                                    | stop game input while the menu is open                                   |
+| `Dashboard.General.ReleaseCursor` | 1                                                    | release the OS cursor while the menu is open                             |
+| `Dashboard.General.ShowFps`       | 1                                                    | FPS counter in the title bar                                             |
+| `Dashboard.General.OpenOnStart`   | 0                                                    | open the menu as soon as the overlay starts                              |
+| `Dashboard.General.Highlight`     | 0                                                    | colour log and trace lines by what their parts are                       |
+
+## Logs
+
+Important messages are logged in `cleo.log` (check your CLEO configuration to locate it, the root directory is default), each prefixed `[Dashboard]`. To help with troubleshooting enable additional logs in `.cleo_config.ini`:
+
+```ini
+[Plugins]
+Dashboard.Debug.Log=1
+```
+
+These extra logs will go into `SA.Dashboard.log` in cleo.log directory.
 
 ## Requirements
 

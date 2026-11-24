@@ -34,9 +34,47 @@ const K_HIGHLIGHT: &str = "Dashboard.General.Highlight";
 /// on the Settings page.
 const K_LOG_SOURCE: &str = "Dashboard.General.LogSource";
 
-/// The key the menu opens and closes on out of the box. Backtick is the one key the
-/// alphabet, the digits and the punctuation row do without.
+/// The hotkey out of the box: backtick on a US layout. Used when the layout has no backtick.
 pub const DEFAULT_TOGGLE_KEY: u8 = 0xC0;
+
+/// The virtual key the active layout puts the backtick character on, or [`DEFAULT_TOGGLE_KEY`].
+pub fn default_toggle_key() -> i32 {
+    use hudhook::windows::Win32::UI::Input::KeyboardAndMouse::VkKeyScanA;
+
+    let scan = unsafe { VkKeyScanA(b'`' as i8) };
+    vk_from_key_scan(scan).unwrap_or(DEFAULT_TOGGLE_KEY as i32)
+}
+
+/// The active keyboard layout's id, e.g. `00000409` for US.
+pub fn keyboard_layout_name() -> String {
+    use hudhook::windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardLayoutNameW;
+
+    let mut buffer = [0u16; 9];
+    if unsafe { GetKeyboardLayoutNameW(&mut buffer) }.is_err() {
+        return "unknown".to_string();
+    }
+
+    let end = buffer.iter().position(|unit| *unit == 0).unwrap_or(buffer.len());
+    String::from_utf16_lossy(&buffer[..end])
+}
+
+/// The virtual key out of a `VkKeyScanA` result: the low byte, or `None` when it is not bindable.
+///
+/// Shift is fine - polling reads key state, so a shifted press is the same key. Ctrl/Alt is not:
+/// on a layout where the character needs AltGr the bare key is something else (`7` on French).
+fn vk_from_key_scan(scan: i16) -> Option<i32> {
+    if scan == -1 {
+        return None;
+    }
+
+    let state = (scan as u16) >> 8;
+    if state & 0x06 != 0 {
+        return None;
+    }
+
+    let vk = (scan as u16) & 0xFF;
+    (1..=0xFE).contains(&vk).then_some(vk as i32)
+}
 
 /// One entry of the hotkey dropdown; the value is a virtual-key code.
 pub struct ToggleKey {
@@ -119,6 +157,11 @@ pub const TOGGLE_KEYS: &[ToggleKey] = &[
     ToggleKey { label: ", (comma)", vk: 0xBC },
     ToggleKey { label: ". (period)", vk: 0xBE },
     ToggleKey { label: "/ (slash)", vk: 0xBF },
+    // Keys only non-US layouts have, and which Apple keyboards report under Boot Camp: the extra
+    // key of the ISO layout and the spare key some European layouts use. Listed last because
+    // there is no character to label them with.
+    ToggleKey { label: "OEM_102", vk: 0xE2 },
+    ToggleKey { label: "OEM_8", vk: 0xDF },
 ];
 
 #[derive(Clone, Copy, PartialEq)]
@@ -140,7 +183,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             theme: theme::Theme::DEFAULT as i32,
-            toggle_key: DEFAULT_TOGGLE_KEY as i32,
+            toggle_key: default_toggle_key(),
             ui_scale: 1.0,
             menu_opacity: 0.9,
             freeze_input: true,
@@ -184,11 +227,16 @@ impl Settings {
     }
 
     pub fn toggle_key_label(&self) -> String {
-        TOGGLE_KEYS
-            .iter()
-            .find(|k| k.vk as i32 == self.toggle_key)
-            .map(|k| k.label.to_string())
-            .unwrap_or_else(|| format!("0x{:02X}", self.toggle_key))
+        if let Some(key) = TOGGLE_KEYS.iter().find(|k| k.vk as i32 == self.toggle_key) {
+            return key.label.to_string();
+        }
+
+        // Not in the US table: on this layout it may still be the backtick key.
+        if self.toggle_key == default_toggle_key() {
+            return format!("` (backtick, this layout's key 0x{:02X})", self.toggle_key);
+        }
+
+        format!("0x{:02X}", self.toggle_key)
     }
 
     /// The bool behind a switch row, if the row is a switch.
@@ -739,10 +787,88 @@ fn labeled(ui: &Ui, label: &str) {
     ui.same_line_with_pos(start + label_column(ui));
 }
 
+/// Writes the keys this overlay owns into `[Plugins]` when they are absent. An existing key is
+/// never touched, so hand-edited values survive.
+pub fn seed_defaults() {
+    let defaults = Settings::default();
+    let mut seeded: Vec<&str> = Vec::new();
+
+    let candidates = [
+        (K_THEME, seed_int(K_THEME, defaults.theme)),
+        (K_TOGGLE_KEY, seed_int(K_TOGGLE_KEY, defaults.toggle_key)),
+        (K_UI_SCALE, seed_float(K_UI_SCALE, defaults.ui_scale)),
+        (K_MENU_OPACITY, seed_float(K_MENU_OPACITY, defaults.menu_opacity)),
+        (K_FREEZE_INPUT, seed_int(K_FREEZE_INPUT, defaults.freeze_input as i32)),
+        (K_RELEASE_CURSOR, seed_int(K_RELEASE_CURSOR, defaults.release_cursor as i32)),
+        (K_SHOW_FPS, seed_int(K_SHOW_FPS, defaults.show_fps as i32)),
+        (K_OPEN_ON_START, seed_int(K_OPEN_ON_START, defaults.open_on_start as i32)),
+        (K_HIGHLIGHT, seed_int(K_HIGHLIGHT, defaults.highlight as i32)),
+        // Not a Settings row: read before the first frame. Listed so the key is discoverable.
+        (
+            crate::dashboard_log::FILE_LOG_KEY,
+            seed_int(crate::dashboard_log::FILE_LOG_KEY, 0),
+        ),
+    ];
+
+    for (key, written) in candidates {
+        if written {
+            seeded.push(key);
+        }
+    }
+
+    if !seeded.is_empty() {
+        log::info!("config: wrote missing defaults for {}", seeded.join(", "));
+    }
+}
+
+/// Whether the key was absent, i.e. whether a default was written.
+fn seed_int(key: &str, value: i32) -> bool {
+    if !cfg_get_text(key).is_empty() {
+        return false;
+    }
+
+    cfg_set_int(key, value);
+    true
+}
+
+fn seed_float(key: &str, value: f32) -> bool {
+    if !cfg_get_text(key).is_empty() {
+        return false;
+    }
+
+    cfg_set_float(key, value);
+    true
+}
+
 // ------------------------------------------------------------- config helpers
 
 fn cs(value: &str) -> CString {
     CString::new(value.replace('\0', "")).unwrap_or_default()
+}
+
+/// The value as CLEO has it, or an empty string when the key is absent. `CLEO_GetConfigInt` cannot
+/// tell the two apart, which is what seeding needs.
+fn cfg_get_text(key: &str) -> String {
+    let key = cs(key);
+    let empty = cs("");
+    let mut buffer = [0i8; 128];
+
+    let length = unsafe {
+        CLEO_GetConfigText(
+            key.as_ptr(),
+            empty.as_ptr(),
+            buffer.as_mut_ptr(),
+            buffer.len() as u32,
+        )
+    };
+
+    if length == 0 {
+        return String::new();
+    }
+
+    unsafe { std::ffi::CStr::from_ptr(buffer.as_ptr()) }
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn cfg_get_int(key: &str, default: i32) -> i32 {
@@ -774,3 +900,43 @@ pub fn highlight() -> bool {
     get().highlight
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::{vk_from_key_scan, DEFAULT_TOGGLE_KEY};
+
+    #[test]
+    fn a_character_the_layout_does_not_have_has_no_key() {
+        assert!(vk_from_key_scan(-1).is_none());
+    }
+
+    #[test]
+    fn the_low_byte_is_the_key_and_the_high_byte_the_shift_state() {
+        // US layout: backtick is VK 0xC0, with and without shift held.
+        assert_eq!(vk_from_key_scan(0x00C0), Some(0xC0));
+        assert_eq!(vk_from_key_scan(0x01C0), Some(0xC0));
+        // The ISO extra key, which is what an Apple keyboard can report for that position.
+        assert_eq!(vk_from_key_scan(0x00E2), Some(0xE2));
+    }
+
+    #[test]
+    fn an_empty_low_byte_is_not_a_key() {
+        assert!(vk_from_key_scan(0x0000).is_none());
+        assert!(vk_from_key_scan(0x01FF).is_none());
+    }
+
+    #[test]
+    fn a_character_behind_altgr_is_not_a_key_to_bind() {
+        // The French layout puts ` behind AltGr+7: the bare key is 7, which the game uses as a
+        // weapon slot. Ctrl+Alt in the shift state, so the character has no plain key.
+        assert!(vk_from_key_scan(0x0637).is_none());
+        assert!(vk_from_key_scan(0x0437).is_none());
+        // Shift alone is accepted: the polling reads key state, so a shifted press is the same key.
+        assert_eq!(vk_from_key_scan(0x0137), Some(0x37));
+    }
+
+    #[test]
+    fn the_fallback_is_the_us_backtick() {
+        assert_eq!(DEFAULT_TOGGLE_KEY, 0xC0);
+    }
+}

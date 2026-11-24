@@ -46,6 +46,9 @@ pub fn set_open(open: bool) {
         return;
     }
 
+    // Per-event, so it stays out of `cleo.log`: a player toggles the menu all evening.
+    log::debug!("menu {}", if open { "opened" } else { "closed" });
+
     unsafe {
         if !open {
             // Let the game re-clip next frame rather than restoring a stale rect.
@@ -210,8 +213,8 @@ unsafe fn patch_slot(slot: *mut usize, new: usize) -> usize {
     previous
 }
 
-/// Walk a module's import directory looking for the IAT entry of `dll!func`.
-unsafe fn find_import_slot(base: usize, dll: &str, func: &str) -> Option<*mut usize> {
+/// Walk a module's import directory for the descriptor of `dll`, returning its first thunk.
+unsafe fn find_import_descriptor(base: usize, dll: &str) -> Option<(usize, usize)> {
     if base == 0 || *(base as *const u16) != 0x5A4D {
         return None; // not an MZ header
     }
@@ -245,35 +248,47 @@ unsafe fn find_import_slot(base: usize, dll: &str, func: &str) -> Option<*mut us
         }
 
         if name_rva != 0 && c_str(base + name_rva).eq_ignore_ascii_case(dll) {
+            // The lookup table to read names from, and the table to patch.
             let thunk = if original_first_thunk != 0 {
                 original_first_thunk
             } else {
                 first_thunk
             };
-
-            let mut index = 0usize;
-            loop {
-                let entry =
-                    *(base.wrapping_add(thunk).wrapping_add(index * 4) as *const u32) as usize;
-                if entry == 0 {
-                    break;
-                }
-
-                // Ordinal imports have the high bit set; these two are imported by name.
-                if entry & 0x8000_0000 == 0 {
-                    let name = c_str(base + (entry & 0x7FFF_FFFF) + 2);
-                    if name.eq_ignore_ascii_case(func) {
-                        return Some(base.wrapping_add(first_thunk).wrapping_add(index * 4)
-                            as *mut usize);
-                    }
-                }
-
-                index += 1;
-            }
+            return Some((thunk, first_thunk));
         }
 
         descriptor = descriptor.wrapping_add(20); // sizeof(IMAGE_IMPORT_DESCRIPTOR)
     }
+}
+
+/// Whether `module` imports from `dll` at all. The probe uses it to find MinHook users.
+pub(crate) fn imports_dll(module: usize, dll: &str) -> bool {
+    unsafe { find_import_descriptor(module, dll).is_some() }
+}
+
+/// Walk a module's import directory looking for the IAT entry of `dll!func`.
+unsafe fn find_import_slot(base: usize, dll: &str, func: &str) -> Option<*mut usize> {
+    let (thunk, first_thunk) = find_import_descriptor(base, dll)?;
+
+    let mut index = 0usize;
+    loop {
+        let entry = *(base.wrapping_add(thunk).wrapping_add(index * 4) as *const u32) as usize;
+        if entry == 0 {
+            break;
+        }
+
+        // Ordinal imports have the high bit set; these two are imported by name.
+        if entry & 0x8000_0000 == 0 {
+            let name = c_str(base + (entry & 0x7FFF_FFFF) + 2);
+            if name.eq_ignore_ascii_case(func) {
+                return Some(base.wrapping_add(first_thunk).wrapping_add(index * 4) as *mut usize);
+            }
+        }
+
+        index += 1;
+    }
+
+    None
 }
 
 unsafe fn c_str(address: usize) -> &'static str {

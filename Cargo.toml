@@ -1,6 +1,6 @@
 [package]
 name = "cleo5-dashboard"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "In-game dashboard for CLEO 5 on GTA San Andreas"
 license = "MIT"
@@ -13,7 +13,6 @@ name = "sa_dashboard"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ctor = "0.1.23"
 hudhook = "0.9.3"
 imgui = { version = "0.12.0", features = ["tables-api"] }
 serde = {version = "1", features = ["derive"]}
@@ -23,6 +22,8 @@ static_assertions = "1.1.0"
 version-compare = "0.1"
 ureq = { version = "2.9", features = ["json"] }
 thiserror = "1.0"
+# Bridges hudhook's own `tracing` events (hook install, render errors) into the overlay's log.
+tracing = "0.1"
 
 [patch.crates-io]
 hudhook = { git = "https://github.com/x87/hudhook", rev = "f4727801b15dd3ed4de1995ca3ac8ed5a2a673e4" }

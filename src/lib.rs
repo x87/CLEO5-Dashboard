@@ -7,15 +7,17 @@ extern crate static_assertions;
 
 mod app;
 mod chrome;
+mod dashboard_log;
 mod debug;
 mod highlight;
+mod hook_install;
+mod hook_probe;
 mod icons;
 mod logtail;
 mod modules;
 mod nav;
 mod overlay;
 mod pages;
-mod panic_log;
 mod plugins;
 mod sdk;
 mod settings;

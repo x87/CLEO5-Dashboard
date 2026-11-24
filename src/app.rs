@@ -1,17 +1,19 @@
 //! The menu: the state the render loop keeps between frames, and the frame that draws the
 //! sheet and hands this frame's keys to the page that is up.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use hudhook::windows::Win32::System::SystemInformation::GetTickCount;
 use hudhook::*;
 use imgui::{Condition, Context, StyleVar, Ui};
 
 use crate::chrome;
+use crate::dashboard_log;
 use crate::debug;
 use crate::icons;
 use crate::nav::{Intent, Nav};
 use crate::overlay;
 use crate::pages::{self, Report};
-use crate::panic_log;
 use crate::plugins;
 use crate::settings;
 use crate::sdk::CLEO_GetVersionStr;
@@ -159,12 +161,35 @@ fn current_page(tab: usize) -> &'static str {
 
 impl ImguiRenderLoop for Dashboard {
     fn initialize(&mut self, ctx: &mut Context, _render_context: &mut dyn RenderContext) {
-        // Before anything that could panic: the file has to exist from the first frame on.
-        panic_log::install();
-        log::info!("Imgui initialized");
+        // `Once`-guarded; both ran on the install thread unless it never started.
+        dashboard_log::install();
+        dashboard_log::configure();
+        log::info!("log: {}", dashboard_log::destination());
+
+        // The Settings page only writes these keys when a row is edited.
+        settings::seed_defaults();
+
+        log::info!("initialize: first frame is drawing");
         theme::register_fonts(ctx);
 
         let current = settings::get();
+        log::info!(
+            "settings: toggle key {} (VK 0x{:02X}), ui scale {}, theme {}, opacity {}, open on start {}",
+            current.toggle_key_label(),
+            current.toggle_key,
+            current.ui_scale,
+            current.theme,
+            current.menu_opacity,
+            current.open_on_start,
+        );
+
+        // The hotkey is a virtual key, so the layout decides which one it is.
+        log::info!(
+            "input: keyboard layout {}, the layout puts '`' on VK 0x{:02X}",
+            settings::keyboard_layout_name(),
+            settings::default_toggle_key(),
+        );
+
         theme::set_current(theme::Theme::from_int(current.theme));
         theme::apply(ctx);
         self.style = Some((current.theme, current.menu_opacity));
@@ -189,6 +214,8 @@ impl ImguiRenderLoop for Dashboard {
         if current.open_on_start {
             overlay::set_open(true);
         }
+
+        log::info!("initialize: done");
     }
 
     fn before_render<'a>(
@@ -244,14 +271,24 @@ impl ImguiRenderLoop for Dashboard {
     }
 
     fn render(&mut self, ui: &mut imgui::Ui) {
-        // A panic in here unwinds into hudhook's `extern "system"` detour, where Rust aborts
-        // the process. Catching it keeps the game and puts the reason in the panic log.
-        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.render_frame(ui)))
-            .is_err()
-        {
-            // The frame stopped half drawn: close the sheet so the next open starts clean
-            // rather than repeating the panic every frame.
-            overlay::set_open(false);
+        // Once per session: proof that the detour, the device and the pipeline all work.
+        static FIRST_FRAME: AtomicBool = AtomicBool::new(false);
+        if !FIRST_FRAME.swap(true, Ordering::Relaxed) {
+            log::info!("render: first frame drawn, the overlay is live");
+        }
+
+        // A panic here unwinds into hudhook's `extern "system"` detour, where Rust aborts the
+        // process; catching it keeps the game and records the reason.
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.render_frame(ui))) {
+            Ok(()) => {}
+            Err(payload) => {
+                log::error!(
+                    "render: panicked, sheet closed: {}",
+                    dashboard_log::panic_message(&*payload)
+                );
+                // Half a frame is on screen; close it so the panic does not repeat every frame.
+                overlay::set_open(false);
+            }
         }
     }
 }
@@ -591,10 +628,4 @@ impl Dashboard {
 
         (summary, note, quick, toggle)
     }
-}
-
-#[ctor::ctor]
-fn main() {
-    use hudhook::hooks::dx9::ImguiDx9Hooks;
-    hudhook!(ImguiDx9Hooks, Dashboard::default());
 }

@@ -1,3 +1,8 @@
+## 0.2.1
+
+- print log messages in `cleo.log` and extra debug messages in `SA.Dashboard.log` with `Dashboard.Debug.Log=1` enabled
+- change the way the default hotkey is resolved to support some non-US keyboards
+
 ## 0.2.0
 
 - complete UX overhaul with keyboard navigation

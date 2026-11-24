@@ -98,6 +98,13 @@ pub const CB_OPCODE_AFTER: u32 = 9;
 /// `CLEO::eCallbackId::Log`.
 pub const CB_LOG: u32 = 12;
 
+/// `CLEO::eLogLevel`. Only decides which `Log` callbacks hear a message; `CDebug::Trace` writes the
+/// text to `cleo.log` regardless.
+pub const LOG_NONE: u32 = 0;
+pub const LOG_DEBUG: u32 = 1;
+pub const LOG_ERROR: u32 = 2;
+pub const LOG_DEFAULT: u32 = 3;
+
 /// `CLEO::OpcodeResult`, which is `enum : char`.
 pub const OR_NONE: i8 = -2;
 pub const OR_ERROR: i8 = -1;
@@ -160,6 +167,9 @@ extern "stdcall" {
     pub fn CLEO_GetLogDirectory() -> *const i8;
 
     // .cleo_config.ini management ([Plugins] section)
+    /// Appends a message to `cleo.log` and calls every registered `Log` callback.
+    pub fn CLEO_Log(level: u32, message: *const i8);
+
     pub fn CLEO_GetConfigInt(key: *const i8, defaultValue: i32) -> i32;
     pub fn CLEO_GetConfigFloat(key: *const i8, defaultValue: f32) -> f32;
     pub fn CLEO_GetConfigText(
@@ -209,7 +219,10 @@ extern "stdcall" {
     pub fn CLEO_UnregisterCallback(id: u32, func: *mut c_void);
 
     // Offset of a code position within the script, counted from its base.
-    pub fn CLEO_GetScriptBaseRelativeOffset(script: *const CRunningScript, codePos: *const u8) -> u32;
+    pub fn CLEO_GetScriptBaseRelativeOffset(
+        script: *const CRunningScript,
+        codePos: *const u8,
+    ) -> u32;
     // Length of the current `cleo_call` chain.
     pub fn CLEO_GetCleoCallStackSize(script: *mut CRunningScript) -> u32;
     // Whether CLEO still owns this pointer. Scripts may be inactive or pending deletion.
