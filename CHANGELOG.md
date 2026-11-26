@@ -1,3 +1,7 @@
+## 0.2.2
+
+- fix a crash on game exit
+
 ## 0.2.1
 
 - print log messages in `cleo.log` and extra debug messages in `SA.Dashboard.log` with `Dashboard.Debug.Log=1` enabled

@@ -240,6 +240,19 @@ pub fn install() {
     log::info!("script debug: opcode callbacks registered");
 }
 
+/// Unsubscribe all callbacks to prevent crashing when CLEO tries to call into unloaded module
+pub fn unregister() {
+    let before: OpcodeHookBefore = on_opcode_before;
+    let after: OpcodeHookAfter = on_opcode_after;
+    let log_hook: LogHook = on_log;
+
+    unsafe {
+        CLEO_UnregisterCallback(CB_OPCODE_BEFORE, before as *mut c_void);
+        CLEO_UnregisterCallback(CB_OPCODE_AFTER, after as *mut c_void);
+        CLEO_UnregisterCallback(CB_LOG, log_hook as *mut c_void);
+    }
+}
+
 /// Apply the work a drawn window queued: windows never lock the state they draw from.
 pub fn tick() {
     // The same for windows opened from inside a window, e.g. the Next button.

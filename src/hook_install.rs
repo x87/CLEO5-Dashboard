@@ -10,16 +10,26 @@ use hudhook::windows::Win32::Graphics::Direct3D9::{
     Direct3DCreate9, D3DADAPTER_DEFAULT, D3DADAPTER_IDENTIFIER9, D3DCAPS9,
     D3DDEVCAPS_HWTRANSFORMANDLIGHT, D3DDEVTYPE_HAL, D3DDISPLAYMODE, D3D_SDK_VERSION,
 };
-use hudhook::windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
+use hudhook::windows::Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH};
 use hudhook::Hudhook;
 
 use crate::app::Dashboard;
 use crate::dashboard_log;
+use crate::debug;
 use crate::hook_probe;
+use crate::overlay;
 
 #[allow(non_snake_case)]
 #[no_mangle]
 pub unsafe extern "system" fn DllMain(hmodule: HINSTANCE, reason: u32, _reserved: *mut c_void) {
+    if reason == DLL_PROCESS_DETACH {
+        if overlay::is_open() {
+            overlay::set_open(false);
+        }
+        debug::unregister();
+        return;
+    }
+
     if reason != DLL_PROCESS_ATTACH {
         return;
     }
